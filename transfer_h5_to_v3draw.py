@@ -7,13 +7,7 @@ import os
 from functools import reduce
 import psutil
 import tqdm
-
-try:
-    from v3d_io import write_v3d_header, append_v3d_chunk
-    USE_CHUNKED_WRITE = True
-except ImportError:
-    USE_CHUNKED_WRITE = False
-    print("Warning: v3d_io chunked write functions not available, using standard write")
+from v3d_io import write_v3d_header, append_v3d_chunk
 
 def get_memory_usage():
     """获取当前内存使用情况(MB)"""
@@ -112,9 +106,9 @@ def process_h5_to_v3draw(input_file, output_folder, chunk_size_z=16):
     
     Z, Y, X = full_shape
     
-    # 写入v3d文件头，格式为(1, Z, Y, X) MIP兼容格式
-    print(f"Writing v3d header for shape: (1, {Z}, {X}, {Y})")
-    if not write_v3d_header(out_file, (Y, X, Z, 1), datatype=2):
+    # 写入v3d文件头，格式为(X, Y, Z, C) - 文件头中size的顺序
+    print(f"Writing v3d header for shape: (X={X}, Y={Y}, Z={Z}, C=1)")
+    if not write_v3d_header(out_file, (X, Y, Z, 1), datatype=2):
         raise Exception("Failed to write v3d header")
     
     # 按Z切片处理，减少内存占用
@@ -186,8 +180,9 @@ def process_h5_to_v3draw(input_file, output_folder, chunk_size_z=16):
                 except Exception as e:
                     print(f"\nError processing block {idx}: {str(e)}")
         
-        # 转换为v3d格式: (Z, Y, X) -> (1, Z, Y, X)
-        chunk_to_write = np.array([z_chunk_data], dtype=np.uint16)  # (1, Z, Y, X)
+        # 转换为v3d格式: (Z, Y, X) -> (C, Z, Y, X)
+        # 添加C维度，数据存储顺序为(C, Z, Y, X)
+        chunk_to_write = z_chunk_data[np.newaxis, :, :, :]  # (1, Z, Y, X)
         
         # 写入当前Z切片到文件
         if not append_v3d_chunk(out_file, chunk_to_write):
@@ -274,19 +269,28 @@ def factor_pairs(n):
                 pairs.append((n // i, i))
     return pairs
 
-if __name__ == '__main__':
-    # 修改路径
-    input_folder = '/home/seele/Desktop/Data/H5'  # H5图像输入路径
-    output_folder = "/home/seele/Desktop/Data/v3draw"  # v3draw与terafly图像输出路径
+
+def Batch_H5ToV3draw(input_dir, output_folder=None, chunk_size_z=50):
+    """
+    批量转换指定目录下的所有H5文件到v3draw格式
     
-    for root, _, files in os.walk(input_folder):
+    Parameters:
+    -----------
+    input_dir : str
+        输入目录，包含待处理的H5文件
+    output_folder : str
+        输出目录，v3draw文件的保存路径
+    chunk_size_z : int, optional
+        Z轴分片大小，默认50
+    """
+    for root, _, files in os.walk(input_dir):
         for file in files:
             if file.endswith('.h5'):
                 file_path = os.path.join(root, file)
                 try:
                     print(f"process_h5_to_v3draw: {file_path}")
-                    # 使用更小的Z块大小(8或16)来减少内存占用
-                    process_h5_to_v3draw(file_path, output_folder, chunk_size_z=50)
+                    # 使用更小的Z块大小来减少内存占用
+                    process_h5_to_v3draw(file_path, output_folder, chunk_size_z=chunk_size_z)
                     print("gc collect begin")
                     gc.collect()
                     print("gc collect end")
@@ -299,14 +303,37 @@ if __name__ == '__main__':
                     print("gc collect end")
                 print('-------------------------------')
 
-    # # 全部转成v3draw后，开始转化terafly
-    # tera_app = "/home/seuallen/Desktop/transfer_h5_to_v3draw_New/teraconverter64"
-    
-    # if not os.path.exists(output_folder):
-    #     os.mkdir(output_folder)
-    
-    # if not os.path.exists(tera_app):
-    #     print(f"Error: Teraconverter application '{tera_app}' does not exist")
-    #     sys.exit(1)
-    
-    # convert_v3draw_to_terafly(output_folder, tera_app)
+
+def Single_H5ToV3draw(input_file, output_folder=None, chunk_size_z=50):
+    """
+    单个H5文件转换入口函数
+
+    Parameters:
+    -----------
+    input_file : str
+        输入H5文件路径
+    output_folder : str, optional
+        输出目录路径，如果为None则使用输入文件所在目录
+    chunk_size_z : int, optional
+        Z轴分片大小，默认50
+    """
+    # 如果没有指定输出目录，则使用输入文件所在目录
+    if output_folder is None:
+        output_folder = os.path.dirname(input_file)
+
+    return process_h5_to_v3draw(input_file, output_folder, chunk_size_z=chunk_size_z)
+
+if __name__ == "__main__":
+    # python3 {script_path} --image-path "{image_path}"
+    # 解析参数 --image-path
+    import argparse
+    parser = argparse.ArgumentParser(description="Convert H5 images to v3draw format.")
+    parser.add_argument('--image-path', type=str, required=True, help='Path to the H5 image file or directory.')
+    args = parser.parse_args()
+
+    input_path = args.image_path.strip()
+
+    if os.path.isdir(input_path):
+        Batch_H5ToV3draw(input_path)
+    else:
+        Single_H5ToV3draw(input_path)

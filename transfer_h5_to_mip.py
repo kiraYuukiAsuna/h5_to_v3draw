@@ -421,7 +421,7 @@ def get_concat_method(rows, cols, image_shapes):
 
 
 # 批处理示例
-def batch_process_h5_to_mip(input_dir="/home/seele/Desktop/Data/H5", 
+def batch_process_h5_to_mip(input_dir, 
                            use_chunked=True, 
                            chunk_size_z=50,
                            orientation_fix='both_flip'):
@@ -456,7 +456,7 @@ def batch_process_h5_to_mip(input_dir="/home/seele/Desktop/Data/H5",
                 processed_count += 1                # 按照 . 分割文件名，取第一部分
                 base_name = file.split('.')[0]
                 # 拼接新的文件名
-                output_filename = base_name + "_mip.tiff"
+                output_filename = base_name + "_MIP.tif"
                 output_path = os.path.join(root, output_filename)
 
                 print(f"\n[{processed_count}] 处理文件: {file}")
@@ -477,24 +477,121 @@ def batch_process_h5_to_mip(input_dir="/home/seele/Desktop/Data/H5",
     print(f"失败数: {processed_count - success_count}")
 
 
-if __name__ == "__main__":
-    # 推荐使用分片模式处理大文件，并启用图像方向修正
-    batch_process_h5_to_mip(
-        input_dir="/home/seele/Desktop/Data/H5",
-        use_chunked=True,              # 启用分片模式
-        chunk_size_z=50,               # 可根据内存情况调整
-        orientation_fix='flipud'    # 启用图像方向修正（修复上下左右翻转）
+def Batch_Process_h5_to_mip(input_dir, 
+                           use_chunked=True, 
+                           chunk_size_z=50,
+                           orientation_fix='none'):
+    """
+    批量处理H5文件生成MIP
+    
+    Parameters:
+    -----------
+    input_dir : str
+        输入目录路径
+    use_chunked : bool
+        是否使用分片模式
+    chunk_size_z : int
+        Z轴分片大小
+    orientation_fix : str
+        方向修正类型：'none', 'flipud', 'fliplr', 'both_flip', 'rot90', 'rot180', 'rot270', 'transpose', 'transpose_flip'
+    """
+    print(f"开始批量处理，输入目录: {input_dir}")
+    print(f"处理模式: {'分片模式' if use_chunked else '原始模式'}")
+    print(f"图像方向修正: {orientation_fix}")
+    if use_chunked:
+        print(f"分片大小: {chunk_size_z}")
+    print("=" * 50)
+    
+    processed_count = 0
+    success_count = 0
+    
+    for root, _, files in os.walk(input_dir):
+        for file in files:
+            if file.endswith('.h5'):
+                file_path = os.path.join(root, file)
+                processed_count += 1
+                # 按照 . 分割文件名，取第一部分
+                base_name = file.split('.')[0]
+                # 拼接新的文件名
+                output_filename = base_name + "_MIP.tif"
+                output_path = os.path.join(root, output_filename)
+
+                if os.path.exists(output_path):
+                    print(f"{output_path} exist, skip")
+                    continue
+
+                print(f"\n[{processed_count}] 处理文件: {file}")
+                try:
+                    success = transfer_h5_to_mip(file_path, output_path, use_chunked, chunk_size_z, orientation_fix)
+                    if success:
+                        success_count += 1
+                        print("✓ 处理成功")
+                    else:
+                        print("✗ 处理失败")
+                except Exception as e:
+                    print(f"✗ 处理异常: {e}")
+                print("-" * 30)
+    
+    print(f"\n批量处理完成！")
+    print(f"总文件数: {processed_count}")
+    print(f"成功处理: {success_count}")
+    print(f"失败数: {processed_count - success_count}")
+
+
+def Single_H5ToMip(input_file, output_file=None, 
+                   use_chunked=True, chunk_size_z=50, 
+                   orientation_fix='none'):
+    """
+    单个文件H5转MIP入口函数
+
+    Parameters:
+    -----------
+    input_file : str
+        输入H5文件路径
+    output_file : str, optional
+        输出MIP图像文件路径
+    use_chunked : bool, optional
+        是否使用分片模式（推荐用于大文件）
+    chunk_size_z : int, optional
+        Z轴分片大小，仅在use_chunked=True时有效
+    orientation_fix : str, optional
+        方向修正类型：'none', 'flipud', 'fliplr', 'both_flip', 'rot90', 'rot180', 'rot270', 'transpose', 'transpose_flip'
+    """
+
+    # 如果没有指定输出文件名，则生成默认输出文件名
+    if output_file is None:
+        directory = os.path.dirname(input_file)
+        filename = os.path.basename(input_file)
+        base_name = filename.split('.')[0]
+        output_file = os.path.join(directory, f"{base_name}_MIP.tif")
+
+    return transfer_h5_to_mip(
+        input_file,
+        output_file,
+        use_chunked=use_chunked,
+        chunk_size_z=chunk_size_z,
+        orientation_fix=orientation_fix
     )
-    
-    # 其他可用的方向修正选项：
-    # orientation_fix='none'           # 不修正
-    # orientation_fix='flipud'         # 只上下翻转
-    # orientation_fix='fliplr'         # 只左右翻转
-    # orientation_fix='rot90'          # 顺时针90度旋转
-    # orientation_fix='rot180'         # 180度旋转
-    # orientation_fix='rot270'         # 顺时针270度旋转
-    # orientation_fix='transpose'      # 转置
-    # orientation_fix='transpose_flip' # 转置+上下翻转
-    
-    # 如果需要使用原始模式（适用于小文件或内存充足时）：
-    # batch_process_h5_to_mip(use_chunked=False, orientation_fix='both_flip')
+
+
+if __name__ == "__main__":
+    # python3 {script_path} --image-path "{image_path}"
+    # 解析参数 --image-path
+    # import argparse
+    # parser = argparse.ArgumentParser(description="Process H5 files to generate MIP images.")
+    # parser.add_argument('--image-path', type=str, required=True, help='Path to the H5 file or directory.')
+    # args = parser.parse_args()
+
+    # input_path = args.image_path.strip()
+    input_path = R"D:\Workspace\h5_to_v3draw\Data\H5\P095_T01_R01_S004.pyramid.h5"
+
+    if os.path.isdir(input_path):
+        # 批量处理目录下的所有H5文件
+        Batch_Process_h5_to_mip(
+            input_path
+        )
+    else:
+        # 单个文件处理
+        Single_H5ToMip(
+            input_path
+        )
